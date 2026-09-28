@@ -12,6 +12,10 @@ import (
 // Config contains application settings loaded from environment variables.
 type Config struct {
 	HTTPAddr                string
+	HTTPReadTimeout         time.Duration
+	HTTPReadHeaderTimeout   time.Duration
+	HTTPWriteTimeout        time.Duration
+	HTTPIdleTimeout         time.Duration
 	DatabaseURL             string
 	LogLevel                string
 	ShutdownTimeout         time.Duration
@@ -31,6 +35,18 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if cfg.DatabaseURL, err = requiredString("DATABASE_URL"); err != nil {
+		return Config{}, err
+	}
+	if cfg.HTTPReadTimeout, err = durationOrDefault("HTTP_READ_TIMEOUT", 5*time.Second); err != nil {
+		return Config{}, err
+	}
+	if cfg.HTTPReadHeaderTimeout, err = durationOrDefault("HTTP_READ_HEADER_TIMEOUT", 5*time.Second); err != nil {
+		return Config{}, err
+	}
+	if cfg.HTTPWriteTimeout, err = durationOrDefault("HTTP_WRITE_TIMEOUT", 10*time.Second); err != nil {
+		return Config{}, err
+	}
+	if cfg.HTTPIdleTimeout, err = durationOrDefault("HTTP_IDLE_TIMEOUT", time.Minute); err != nil {
 		return Config{}, err
 	}
 	if cfg.LogLevel, err = requiredString("LOG_LEVEL"); err != nil {
@@ -92,6 +108,13 @@ func requiredDuration(name string) (time.Duration, error) {
 		return 0, fmt.Errorf("%s must be greater than zero", name)
 	}
 	return duration, nil
+}
+
+func durationOrDefault(name string, fallback time.Duration) (time.Duration, error) {
+	if strings.TrimSpace(os.Getenv(name)) == "" {
+		return fallback, nil
+	}
+	return requiredDuration(name)
 }
 
 func requiredInt32(name string) (int32, error) {
