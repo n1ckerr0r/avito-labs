@@ -30,45 +30,77 @@ func New(trips *service.Trips, pool *pgxpool.Pool, queryTimeout time.Duration) *
 }
 
 func (h *Handler) CreateTrip(w http.ResponseWriter, r *http.Request, params api.CreateTripParams) {
-	var input api.TripData
+	var input createTripInput
 	if err := decodeJSON(r, &input); err != nil {
 		h.problem(w, r, http.StatusBadRequest, "invalid_request", "Invalid request", err.Error())
 		return
 	}
+
 	if err := validate(input); err != nil {
 		h.problem(w, r, http.StatusBadRequest, "invalid_request", "Invalid request", err.Error())
 		return
 	}
+
 	now := time.Now().UTC()
-	trip := domain.Trip{ID: uuid.New(), UserID: input.UserId, DriverID: input.DriverId, StartPoint: coords(input.StartPoint), EndPoint: coords(input.EndPoint), Price: input.Price, Status: "active", StartedAt: now}
+	trip := domain.Trip{
+		ID:       uuid.New(),
+		UserID:   *input.UserID,
+		DriverID: *input.DriverID,
+		StartPoint: domain.Coordinates{
+			Latitude:  *input.StartPoint.Latitude,
+			Longitude: *input.StartPoint.Longitude,
+		},
+		EndPoint: domain.Coordinates{
+			Latitude:  *input.EndPoint.Latitude,
+			Longitude: *input.EndPoint.Longitude,
+		},
+		Price:     *input.Price,
+		Status:    "active",
+		StartedAt: now,
+	}
 	payload, _ := json.Marshal(input)
 	hash := sha256.Sum256(payload)
-	createdTrip, created, err := h.trips.Create(r.Context(), trip, params.IdempotencyKey, hash[:])
+
+	ctx, cancel := context.WithTimeout(r.Context(), h.queryTimeout)
+	defer cancel()
+
+	createdTrip, created, err := h.trips.Create(ctx, trip, params.IdempotencyKey, hash[:])
 	if err != nil {
 		h.writeError(w, r, err)
 		return
 	}
+
 	if created {
 		w.Header().Set("Location", "/api/v1/trips/"+createdTrip.ID.String())
 		writeJSON(w, http.StatusCreated, toAPI(createdTrip))
+
 		return
 	}
+
 	writeJSON(w, http.StatusOK, toAPI(createdTrip))
 }
 func (h *Handler) GetTrip(w http.ResponseWriter, r *http.Request, id api.TripId) {
-	trip, err := h.trips.Get(r.Context(), id)
+	ctx, cancel := context.WithTimeout(r.Context(), h.queryTimeout)
+	defer cancel()
+
+	trip, err := h.trips.Get(ctx, id)
 	if err != nil {
 		h.writeError(w, r, err)
 		return
 	}
+
 	writeJSON(w, http.StatusOK, toAPI(trip))
 }
 func (h *Handler) FinishTrip(w http.ResponseWriter, r *http.Request, id api.TripId) {
-	trip, err := h.trips.Finish(r.Context(), id)
+	ctx, cancel := context.WithTimeout(r.Context(), h.queryTimeout)
+	defer cancel()
+
+	trip, err := h.trips.Finish(ctx, id)
 	if err != nil {
 		h.writeError(w, r, err)
 		return
 	}
+
 	writeJSON(w, http.StatusOK, toAPI(trip))
 }
 func (h *Handler) Health(w http.ResponseWriter, _ *http.Request) {
@@ -77,10 +109,12 @@ func (h *Handler) Health(w http.ResponseWriter, _ *http.Request) {
 func (h *Handler) Ready(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), h.queryTimeout)
 	defer cancel()
+
 	if err := h.pool.Ping(ctx); err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, api.HealthResponse{Status: api.Unavailable})
 		return
 	}
+
 	writeJSON(w, http.StatusOK, api.HealthResponse{Status: api.Ok})
 }
 
@@ -92,6 +126,8 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) 
 		h.problem(w, r, 409, "trip_completed", "Trip completed", "Trip is already completed")
 	case errors.Is(err, domain.ErrDriverBusy):
 		h.problem(w, r, 409, "driver_busy", "Driver busy", "Driver already has an active trip")
+	case errors.Is(err, domain.ErrConflict):
+		h.problem(w, r, 409, "conflict", "Conflict", "Trip conflicts with existing data")
 	case errors.Is(err, domain.ErrIdempotencyConflict):
 		h.problem(w, r, 409, "idempotency_conflict", "Idempotency conflict", "Idempotency key was used with a different request")
 	default:
@@ -110,30 +146,56 @@ func decodeJSON(r *http.Request, target any) error {
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		return errors.New("Content-Type must be application/json")
 	}
+
 	d := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
 	d.DisallowUnknownFields()
+
 	if err := d.Decode(target); err != nil {
 		return err
 	}
+
 	if d.Decode(&struct{}{}) != io.EOF {
 		return errors.New("request body must contain one JSON value")
 	}
+
 	return nil
 }
-func validate(t api.TripData) error {
-	if t.UserId == uuid.Nil || t.DriverId == uuid.Nil {
+
+type coordinatesInput struct {
+	Latitude  *float64 `json:"latitude"`
+	Longitude *float64 `json:"longitude"`
+}
+
+type createTripInput struct {
+	UserID     *uuid.UUID        `json:"user_id"`
+	DriverID   *uuid.UUID        `json:"driver_id"`
+	StartPoint *coordinatesInput `json:"start_point"`
+	EndPoint   *coordinatesInput `json:"end_point"`
+	Price      *int64            `json:"price"`
+}
+
+func validate(t createTripInput) error {
+	if t.UserID == nil || t.DriverID == nil || t.StartPoint == nil || t.EndPoint == nil || t.Price == nil {
+		return errors.New("user_id, driver_id, start_point, end_point, and price are required")
+	}
+
+	if *t.UserID == uuid.Nil || *t.DriverID == uuid.Nil {
 		return errors.New("user_id and driver_id must be non-empty UUIDs")
 	}
-	if t.Price < 0 {
+
+	if t.StartPoint.Latitude == nil || t.StartPoint.Longitude == nil || t.EndPoint.Latitude == nil || t.EndPoint.Longitude == nil {
+		return errors.New("latitude and longitude are required for both points")
+	}
+
+	if *t.Price < 0 {
 		return errors.New("price must not be negative")
 	}
-	if t.StartPoint.Latitude < -90 || t.StartPoint.Latitude > 90 || t.EndPoint.Latitude < -90 || t.EndPoint.Latitude > 90 || t.StartPoint.Longitude < -180 || t.StartPoint.Longitude > 180 || t.EndPoint.Longitude < -180 || t.EndPoint.Longitude > 180 {
+
+	if *t.StartPoint.Latitude < -90 || *t.StartPoint.Latitude > 90 || *t.EndPoint.Latitude < -90 || *t.EndPoint.Latitude > 90 || *t.StartPoint.Longitude < -180 || *t.StartPoint.Longitude > 180 || *t.EndPoint.Longitude < -180 || *t.EndPoint.Longitude > 180 {
 		return errors.New("coordinates are outside valid ranges")
 	}
+
 	return nil
-}
-func coords(c api.Coordinates) domain.Coordinates {
-	return domain.Coordinates{Latitude: c.Latitude, Longitude: c.Longitude}
 }
 func toAPI(t domain.Trip) api.Trip {
 	return api.Trip{Id: t.ID, UserId: t.UserID, DriverId: t.DriverID, StartPoint: api.Coordinates{Latitude: t.StartPoint.Latitude, Longitude: t.StartPoint.Longitude}, EndPoint: api.Coordinates{Latitude: t.EndPoint.Latitude, Longitude: t.EndPoint.Longitude}, Price: t.Price, Status: api.TripStatus(t.Status), StartedAt: t.StartedAt, FinishedAt: t.FinishedAt}

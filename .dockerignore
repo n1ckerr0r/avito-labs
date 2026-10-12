@@ -1,4 +1,7 @@
 .git
 .env
+.env.*
 .tripgo
 bin
+**/*_test.go
+**/testdata

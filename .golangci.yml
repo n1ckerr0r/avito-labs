@@ -1,0 +1,8 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    # Enforces visual separation between independent code blocks, including
+    # adjacent function declarations.
+    - wsl_v5

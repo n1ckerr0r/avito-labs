@@ -1,4 +1,4 @@
-.PHONY: run build test generate install-tools migrate migrate-up migrate-down
+.PHONY: run build test lint generate install-tools migrate migrate-up migrate-down
 
 BINARY := bin/trip-service
 OPENAPI_SPEC := contracts/openapi/trip-service.openapi.yaml
@@ -12,6 +12,9 @@ build:
 
 test:
 	go test ./...
+
+lint:
+	golangci-lint run
 
 install-tools:
 	go get -tool github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen

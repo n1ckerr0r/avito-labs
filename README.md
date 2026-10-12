@@ -63,3 +63,17 @@ HTTP-сервис поездок для лабораторной работы 1.
 запускается пользователем `nonroot` и содержит только статический бинарный
 файл. Проверенный локально образ `trip-service-lab:local` занимает **13.1 MB**
 (linux/amd64); размер может немного отличаться на другой платформе.
+
+Для воспроизводимого запуска сервиса вместе с PostgreSQL и миграциями:
+
+```bash
+docker compose -f deploy/compose.yaml up --build
+curl -i http://localhost:8080/ready
+```
+
+Контейнер `migrate` однократно накатывает миграции Goose, после чего стартует
+`trip-service`. Чтобы остановить окружение и удалить данные PostgreSQL:
+
+```bash
+docker compose -f deploy/compose.yaml down --volumes
+```
