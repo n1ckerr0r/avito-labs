@@ -29,6 +29,11 @@ func TestNewTrip(t *testing.T) {
 		wantField string
 	}{
 		{name: "valid", userID: userID, driverID: driverID, start: validCoordinates(), end: validCoordinates(), price: 500},
+		{name: "zero price is valid", userID: userID, driverID: driverID, start: validCoordinates(), end: validCoordinates(), price: 0},
+		{name: "latitude -90 is valid", userID: userID, driverID: driverID, start: trip.Coordinates{Latitude: -90, Longitude: 0}, end: validCoordinates(), price: 500},
+		{name: "latitude 90 is valid", userID: userID, driverID: driverID, start: trip.Coordinates{Latitude: 90, Longitude: 0}, end: validCoordinates(), price: 500},
+		{name: "longitude -180 is valid", userID: userID, driverID: driverID, start: trip.Coordinates{Latitude: 0, Longitude: -180}, end: validCoordinates(), price: 500},
+		{name: "longitude 180 is valid", userID: userID, driverID: driverID, start: trip.Coordinates{Latitude: 0, Longitude: 180}, end: validCoordinates(), price: 500},
 		{name: "nil user id", userID: uuid.Nil, driverID: driverID, start: validCoordinates(), end: validCoordinates(), price: 500, wantField: "user_id"},
 		{name: "nil driver id", userID: userID, driverID: uuid.Nil, start: validCoordinates(), end: validCoordinates(), price: 500, wantField: "driver_id"},
 		{name: "start latitude too high", userID: userID, driverID: driverID, start: trip.Coordinates{Latitude: 91, Longitude: 0}, end: validCoordinates(), price: 500, wantField: "start_point.latitude"},

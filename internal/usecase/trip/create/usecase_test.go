@@ -49,6 +49,55 @@ func TestUsecase_Execute_Create(t *testing.T) {
 	assert.Equal(t, string(trip.StatusActive), result.Status)
 }
 
+func TestUsecase_Execute_Create_NewIdempotencyKey(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	repo := NewMocktripRepository(ctrl)
+	tx := NewMocktxManager(ctrl)
+	passthroughTx(tx)
+
+	key := uuid.New()
+	hash := []byte("hash")
+
+	repo.EXPECT().ClaimIdempotencyKey(gomock.Any(), key, hash).Return(true, nil, uuid.Nil, nil)
+	repo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+	repo.EXPECT().AddStatusHistory(gomock.Any(), gomock.Any(), nil, string(trip.StatusActive), gomock.Any(), gomock.Any()).Return(nil)
+	repo.EXPECT().CompleteIdempotencyKey(gomock.Any(), key, gomock.Any()).Return(nil)
+
+	in := baseInput()
+	in.IdempotencyKey = &key
+	in.RequestHash = hash
+
+	uc := create.New(repo, tx)
+	_, created, err := uc.Execute(context.Background(), in)
+
+	require.NoError(t, err)
+	assert.True(t, created)
+}
+
+func TestUsecase_Execute_CompleteIdempotencyKeyError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	repo := NewMocktripRepository(ctrl)
+	tx := NewMocktxManager(ctrl)
+	passthroughTx(tx)
+
+	key := uuid.New()
+	boom := errors.New("write conflict")
+
+	repo.EXPECT().ClaimIdempotencyKey(gomock.Any(), key, gomock.Any()).Return(true, nil, uuid.Nil, nil)
+	repo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+	repo.EXPECT().AddStatusHistory(gomock.Any(), gomock.Any(), nil, string(trip.StatusActive), gomock.Any(), gomock.Any()).Return(nil)
+	repo.EXPECT().CompleteIdempotencyKey(gomock.Any(), key, gomock.Any()).Return(boom)
+
+	in := baseInput()
+	in.IdempotencyKey = &key
+
+	uc := create.New(repo, tx)
+	_, created, err := uc.Execute(context.Background(), in)
+
+	require.ErrorIs(t, err, boom)
+	assert.False(t, created)
+}
+
 func TestUsecase_Execute_DriverBusy(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	repo := NewMocktripRepository(ctrl)
