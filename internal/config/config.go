@@ -24,6 +24,11 @@ type Config struct {
 	DatabaseConnectTimeout  time.Duration
 	DatabaseQueryTimeout    time.Duration
 	DatabaseMaxConnLifetime time.Duration
+	OTELServiceName         string
+	OTELExporterEndpoint    string
+	OTELExporterProtocol    string
+	OTELResourceAttributes  string
+	OTELTracesSampler       string
 }
 
 // Load reads and validates the required service configuration from the environment.
@@ -98,6 +103,38 @@ func Load() (Config, error) {
 
 	if cfg.DatabaseMinConns < 0 || cfg.DatabaseMinConns > cfg.DatabaseMaxConns {
 		return Config{}, fmt.Errorf("DATABASE_MIN_CONNS must be between zero and DATABASE_MAX_CONNS")
+	}
+
+	if cfg.OTELServiceName, err = requiredString("OTEL_SERVICE_NAME"); err != nil {
+		return Config{}, err
+	}
+
+	if cfg.OTELExporterEndpoint, err = requiredString("OTEL_EXPORTER_OTLP_ENDPOINT"); err != nil {
+		return Config{}, err
+	}
+
+	if cfg.OTELExporterProtocol, err = requiredString("OTEL_EXPORTER_OTLP_PROTOCOL"); err != nil {
+		return Config{}, err
+	}
+
+	switch cfg.OTELExporterProtocol {
+	case "http/protobuf", "grpc":
+	default:
+		return Config{}, fmt.Errorf("OTEL_EXPORTER_OTLP_PROTOCOL must be http/protobuf or grpc; got %q", cfg.OTELExporterProtocol)
+	}
+
+	if cfg.OTELResourceAttributes, err = requiredString("OTEL_RESOURCE_ATTRIBUTES"); err != nil {
+		return Config{}, err
+	}
+
+	if cfg.OTELTracesSampler, err = requiredString("OTEL_TRACES_SAMPLER"); err != nil {
+		return Config{}, err
+	}
+
+	switch cfg.OTELTracesSampler {
+	case "always_on", "always_off", "parentbased_always_on", "parentbased_always_off":
+	default:
+		return Config{}, fmt.Errorf("OTEL_TRACES_SAMPLER must be one of always_on, always_off, parentbased_always_on, parentbased_always_off; got %q", cfg.OTELTracesSampler)
 	}
 
 	return cfg, nil

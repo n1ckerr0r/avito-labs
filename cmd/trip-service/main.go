@@ -4,18 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/n1ckerr0r/avito-labs/api"
 	"github.com/n1ckerr0r/avito-labs/internal/config"
-	"github.com/n1ckerr0r/avito-labs/internal/database"
-	"github.com/n1ckerr0r/avito-labs/internal/httpapi"
-	"github.com/n1ckerr0r/avito-labs/internal/repository"
-	"github.com/n1ckerr0r/avito-labs/internal/service"
+	"github.com/n1ckerr0r/avito-labs/internal/container"
 )
 
 func main() {
@@ -34,47 +29,15 @@ func run() error {
 	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	logLevel := new(slog.LevelVar)
-
-	switch cfg.LogLevel {
-	case "debug":
-		logLevel.Set(slog.LevelDebug)
-	case "warn":
-		logLevel.Set(slog.LevelWarn)
-	case "error":
-		logLevel.Set(slog.LevelError)
-	default:
-		logLevel.Set(slog.LevelInfo)
-	}
-
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})))
-
-	pool, err := database.OpenPool(signalCtx, cfg)
+	app, err := container.New(signalCtx, cfg)
 	if err != nil {
-		return fmt.Errorf("connect to PostgreSQL: %w", err)
-	}
-	defer pool.Close()
-
-	repo := repository.NewTrips(pool)
-	trips := service.NewTrips(repo, database.NewTxManager(pool, cfg.DatabaseQueryTimeout))
-	handler := httpapi.New(trips, pool, cfg.DatabaseQueryTimeout)
-	mux := api.HandlerWithOptions(handler, api.ChiServerOptions{ErrorHandlerFunc: httpapi.ErrorHandler})
-	server := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           mux,
-		ReadTimeout:       cfg.HTTPReadTimeout,
-		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,
-		WriteTimeout:      cfg.HTTPWriteTimeout,
-		IdleTimeout:       cfg.HTTPIdleTimeout,
-		BaseContext: func(net.Listener) context.Context {
-			return signalCtx
-		},
+		return fmt.Errorf("build container: %w", err)
 	}
 
 	errCh := make(chan error, 1)
-	go func() { errCh <- server.ListenAndServe() }()
+	go func() { errCh <- app.Server.ListenAndServe() }()
 
-	slog.Info("trip service started", "address", cfg.HTTPAddr)
+	app.Logger.Info("trip service started", "address", cfg.HTTPAddr)
 
 	select {
 	case err := <-errCh:
@@ -84,13 +47,17 @@ func run() error {
 
 		return nil
 	case <-signalCtx.Done():
-		slog.Info("shutting down")
+		app.Logger.Info("shutting down")
 
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer cancel()
 
-		if err := server.Shutdown(shutdownCtx); err != nil {
+		if err := app.Server.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("shutdown HTTP server: %w", err)
+		}
+
+		if err := app.Close(shutdownCtx); err != nil {
+			return fmt.Errorf("close dependencies: %w", err)
 		}
 
 		return nil

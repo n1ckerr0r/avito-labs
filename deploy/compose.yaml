@@ -43,6 +43,11 @@ services:
       DATABASE_CONNECT_TIMEOUT: 5s
       DATABASE_QUERY_TIMEOUT: 3s
       DATABASE_MAX_CONN_LIFETIME: 1h
+      OTEL_SERVICE_NAME: trip-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=tripgo,deployment.environment=local
+      OTEL_TRACES_SAMPLER: parentbased_always_on
     depends_on:
       migrate:
         condition: service_completed_successfully

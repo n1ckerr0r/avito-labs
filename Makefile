@@ -23,7 +23,7 @@ generate:
 	go tool oapi-codegen \
 		-generate types,chi-server \
 		-package api \
-		-o api/api.gen.go \
+		-o internal/generated/api.gen.go \
 		$(OPENAPI_SPEC)
 
 migrate-up:
